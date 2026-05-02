@@ -135,9 +135,8 @@ class Publisher {
 			return $copy;
 		}
 
-		$media     = $this->resolve_media( $post );
-		$drafts    = [];
-		$failures  = [];
+		$drafts   = [];
+		$failures = [];
 
 		foreach ( $account_groups as $platform => $platform_accounts ) {
 			if ( empty( $platform_accounts ) ) {
@@ -152,15 +151,15 @@ class Publisher {
 				if ( '' === $account_id ) {
 					continue;
 				}
-				$draft_text = $this->maybe_append_link( $text, $platform, $link_url );
-				$result     = $publer->create_draft( $account_id, $draft_text, $link_url, $media );
+				$provider = (string) ( $account['provider'] ?? $account['network'] ?? $account['type'] ?? $platform );
+				$result   = $publer->create_draft( $account_id, $provider, $text, $link_url );
 				if ( is_wp_error( $result ) ) {
 					$failures[] = [
 						'platform' => $platform,
 						'account'  => $account_id,
 						'error'    => $result->get_error_message(),
 					];
-					Logger::warn( 'Publer draft failed', [ 'post_id' => $post->ID, 'platform' => $platform, 'error' => $result->get_error_message() ] );
+					Logger::warn( 'Publer draft failed', [ 'post_id' => $post->ID, 'platform' => $platform, 'error' => $result->get_error_message(), 'data' => $result->get_error_data() ] );
 				} else {
 					$drafts[] = [
 						'platform' => $platform,
@@ -261,30 +260,4 @@ class Publisher {
 		];
 	}
 
-	/**
-	 * @return array<int,string> Public URLs for media to attach (featured image only by default).
-	 */
-	private function resolve_media( \WP_Post $post ): array {
-		$thumb_id = get_post_thumbnail_id( $post );
-		$urls     = [];
-		if ( $thumb_id ) {
-			$src = wp_get_attachment_image_url( $thumb_id, 'full' );
-			if ( $src ) {
-				$urls[] = $src;
-			}
-		}
-		return (array) apply_filters( 'social_publisher_media_urls', $urls, $post );
-	}
-
-	private function maybe_append_link( string $text, string $platform, string $link ): string {
-		if ( '' === $link ) {
-			return $text;
-		}
-		// Some networks won't render the dedicated url field; safest to inline once if missing.
-		if ( false !== strpos( $text, $link ) ) {
-			return $text;
-		}
-		$append = (bool) apply_filters( 'social_publisher_append_link', in_array( $platform, [ 'twitter', 'threads', 'tiktok' ], true ), $platform, $link );
-		return $append ? trim( $text ) . ' ' . $link : $text;
-	}
 }

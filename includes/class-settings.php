@@ -175,10 +175,12 @@ class Settings {
 		$flushed       = ! empty( $_GET['flushed'] );
 
 		// Live preview: connected Publer accounts.
-		$accounts = [];
-		$publer   = new Publer_Client( $this->get_secret( 'publer_api_key' ), $opts['publer_workspace_id'] ?? '' );
+		$accounts      = [];
+		$publer_error  = null;
+		$publer        = new Publer_Client( $this->get_secret( 'publer_api_key' ), $opts['publer_workspace_id'] ?? '' );
 		if ( $publer->is_configured() ) {
-			$accounts = $publer->get_accounts();
+			$accounts     = $publer->get_accounts( true ); // force-refresh on settings page so users see live state
+			$publer_error = $publer->get_last_error();
 		}
 
 		?>
@@ -221,15 +223,46 @@ class Settings {
 					<tr>
 						<th scope="row"><?php esc_html_e( 'Connected Accounts', 'social-publisher' ); ?></th>
 						<td>
-							<?php if ( empty( $accounts ) ) : ?>
-								<p><em><?php esc_html_e( 'No accounts loaded yet. Save settings, then reload this page.', 'social-publisher' ); ?></em></p>
+							<?php if ( ! $publer->is_configured() ) : ?>
+								<p><em><?php esc_html_e( 'Add a Publer API key and Workspace ID, then save to load accounts.', 'social-publisher' ); ?></em></p>
+							<?php elseif ( $publer_error instanceof \WP_Error ) :
+								$data    = $publer_error->get_error_data();
+								$status  = is_array( $data ) ? (int) ( $data['status'] ?? 0 ) : 0;
+								$body    = is_array( $data ) ? (string) ( $data['body'] ?? '' ) : '';
+								$req_url = is_array( $data ) ? (string) ( $data['url'] ?? '' ) : '';
+								?>
+								<div class="notice notice-error inline" style="margin:0 0 8px;">
+									<p><strong><?php esc_html_e( 'Publer API error', 'social-publisher' ); ?></strong></p>
+									<p><?php echo esc_html( $publer_error->get_error_message() ); ?></p>
+									<?php if ( $req_url ) : ?>
+										<p><code><?php echo esc_html( $req_url ); ?></code></p>
+									<?php endif; ?>
+									<?php if ( $body ) : ?>
+										<details><summary><?php esc_html_e( 'Response body', 'social-publisher' ); ?></summary>
+											<pre style="white-space:pre-wrap;word-break:break-all;"><?php echo esc_html( $body ); ?></pre>
+										</details>
+									<?php endif; ?>
+									<?php if ( 401 === $status ) : ?>
+										<p><?php esc_html_e( 'HTTP 401 → Check the API key. It must be a Publer-issued key, not your account password.', 'social-publisher' ); ?></p>
+									<?php elseif ( 403 === $status ) : ?>
+										<p><?php esc_html_e( 'HTTP 403 → The API key likely lacks access to this workspace. Confirm the Workspace ID and that the key was issued for it.', 'social-publisher' ); ?></p>
+									<?php elseif ( 404 === $status ) : ?>
+										<p><?php esc_html_e( 'HTTP 404 → Workspace ID not found, or the endpoint URL is wrong.', 'social-publisher' ); ?></p>
+									<?php endif; ?>
+								</div>
+							<?php elseif ( empty( $accounts ) ) : ?>
+								<p><em><?php esc_html_e( 'Authenticated successfully, but no active social accounts are connected to this workspace in Publer.', 'social-publisher' ); ?></em></p>
 							<?php else : ?>
 								<ul style="margin:0;">
 									<?php foreach ( $accounts as $account ) :
 										$name     = (string) ( $account['name'] ?? $account['username'] ?? $account['id'] ?? '' );
 										$provider = (string) ( $account['provider'] ?? $account['network'] ?? '' );
+										$type     = (string) ( $account['type'] ?? '' );
 									?>
-										<li><strong><?php echo esc_html( $name ); ?></strong> &mdash; <code><?php echo esc_html( $provider ); ?></code></li>
+										<li>
+											<strong><?php echo esc_html( $name ); ?></strong>
+											&mdash; <code><?php echo esc_html( $provider ); ?><?php echo $type ? '/' . esc_html( $type ) : ''; ?></code>
+										</li>
 									<?php endforeach; ?>
 								</ul>
 							<?php endif; ?>
