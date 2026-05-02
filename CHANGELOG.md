@@ -1,8 +1,11 @@
 # Changelog
 
-Versions bump by `0.01` per change. Starting line: `1.0`.
+Versions bump by `0.01` per change. Starting line: `1.00`. Distributable zips
+are versioned: `dist/social-publisher-v<VERSION>.zip`.
 
-## 1.0 — 2026-05-02
+Copyright © 2026 Penny Constellation.
+
+## 1.00 — 2026-05-02
 
 - Initial release.
 - `transition_post_status` → WP-Cron one-shot pipeline (default 60 s).

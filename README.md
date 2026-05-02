@@ -40,11 +40,13 @@ permalink.
 
 ### Easy: download the plugin zip
 
-A pre-built, WP-uploadable zip lives in this repo at
-[`dist/social-publisher.zip`](dist/social-publisher.zip). After every change
-the version bumps by `0.01` and the zip is rebuilt.
+A pre-built, WP-uploadable zip lives in this repo under
+[`dist/`](dist/). The filename tracks the plugin version, e.g.
+[`dist/social-publisher-v1.00.zip`](dist/social-publisher-v1.00.zip).
+After every change the version bumps by `0.01` and a new zip is added (the
+older versions remain for rollback).
 
-1. Download `dist/social-publisher.zip`.
+1. Download the latest `dist/social-publisher-v1.xx.zip`.
 2. In WordPress, go to **Plugins → Add New → Upload Plugin**.
 3. Pick the zip, install, then activate.
 4. Visit **Settings → Social Publisher** and add credentials.
@@ -61,18 +63,23 @@ To rebuild the distributable zip after editing source:
 
 ```sh
 bin/build.sh
-# Built dist/social-publisher.zip (v1.0, 24K)
+# Built dist/social-publisher-v1.00.zip (v1.00, 24K)
 ```
+
+The output filename is derived from the `Version:` header in
+`social-publisher.php`, so bumping the version automatically produces a new,
+version-stamped artifact.
 
 ## Versioning
 
-Starts at **1.0**. Each change bumps the version by **0.01** (1.0 → 1.01 → 1.02
-…). The version is set in two places that must stay in sync:
+Starts at **1.00**. Each change bumps the version by **0.01**
+(1.00 → 1.01 → 1.02 …). The version is set in two places that must stay in
+sync:
 
 - The `Version:` header in `social-publisher.php`
 - The `SOCIAL_PUBLISHER_VERSION` constant in the same file
 
-Then run `bin/build.sh` to refresh `dist/social-publisher.zip`.
+Then run `bin/build.sh` to produce `dist/social-publisher-v<VERSION>.zip`.
 
 ## Configuration
 
@@ -155,4 +162,4 @@ assets/
 
 ## License
 
-GPL-2.0-or-later.
+GPL-2.0-or-later. Copyright © 2026 Penny Constellation.
