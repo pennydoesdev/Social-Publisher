@@ -2,7 +2,7 @@
 /**
  * Plugin Name:       Social Publisher
  * Description:       Auto-generates platform-specific Publer drafts for every published post. Auto-discovers post types and connected Publer accounts, generates per-platform copy with OpenAI, and creates one draft per provider.
- * Version:           0.1.0
+ * Version:           1.0
  * Requires at least: 6.2
  * Requires PHP:      7.4
  * Author:            pennydoesdev
@@ -14,7 +14,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'SOCIAL_PUBLISHER_VERSION', '0.1.0' );
+define( 'SOCIAL_PUBLISHER_VERSION', '1.0' );
 define( 'SOCIAL_PUBLISHER_FILE', __FILE__ );
 define( 'SOCIAL_PUBLISHER_DIR', plugin_dir_path( __FILE__ ) );
 define( 'SOCIAL_PUBLISHER_URL', plugin_dir_url( __FILE__ ) );
