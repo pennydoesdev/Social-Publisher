@@ -14,8 +14,9 @@ if ( ! defined( 'ABSPATH' ) ) {
  *   WS    : Publer-Workspace-Id: <workspace_id>   (sent on every call)
  *
  * Endpoints used:
- *   GET  /api/v1/accounts          (cached 1h on success only)
- *   POST /api/v1/posts/schedule    (creates a post; bulk.state=draft for drafts)
+ *   GET  /api/v1/accounts             (cached 1h on success only)
+ *   POST /api/v1/posts/schedule       (async; returns { job_id })
+ *   GET  /api/v1/job_status/{job_id}  (poll until status != "working")
  *
  * Endpoint paths and request bodies are filterable so the plugin can adapt
  * to API revisions without a code change.
@@ -25,6 +26,9 @@ class Publer_Client {
 	const BASE       = 'https://app.publer.com/api';
 	const ACCT_CACHE = 'social_publisher_accounts_'; // suffixed by workspace id hash
 	const ACCT_TTL   = HOUR_IN_SECONDS;
+
+	const JOB_POLL_INTERVAL_US = 1000000; // 1s
+	const JOB_POLL_MAX_TRIES   = 12;      // ~12s default ceiling
 
 	/** @var string */
 	private $api_key;
@@ -147,7 +151,104 @@ class Publer_Client {
 		if ( is_wp_error( $resp ) ) {
 			return $resp;
 		}
-		return $resp;
+
+		$job_id = is_array( $resp ) ? (string) ( $resp['job_id'] ?? $resp['id'] ?? '' ) : '';
+		if ( '' === $job_id ) {
+			return new \WP_Error(
+				'social_publisher_publer_no_job_id',
+				__( 'Publer did not return a job_id for the scheduled post.', 'social-publisher' ),
+				[ 'response' => $resp ]
+			);
+		}
+
+		$result = $this->wait_for_job( $job_id );
+		if ( is_wp_error( $result ) ) {
+			return $result;
+		}
+		$result['job_id'] = $job_id;
+		return $result;
+	}
+
+	/**
+	 * Poll the job status endpoint until the job is no longer "working".
+	 *
+	 * @return array|\WP_Error  array with keys: status, payload, posts (if present)
+	 */
+	public function wait_for_job( string $job_id ) {
+		$path = apply_filters( 'social_publisher_publer_job_status_path', '/v1/job_status/' . rawurlencode( $job_id ), $job_id );
+		$max  = (int) apply_filters( 'social_publisher_publer_job_max_polls', self::JOB_POLL_MAX_TRIES );
+		$us   = (int) apply_filters( 'social_publisher_publer_job_poll_us', self::JOB_POLL_INTERVAL_US );
+
+		for ( $i = 0; $i < $max; $i++ ) {
+			$resp = $this->request( 'GET', $path );
+			if ( is_wp_error( $resp ) ) {
+				return $resp;
+			}
+
+			$status = strtolower( (string) ( $resp['status'] ?? '' ) );
+			if ( 'working' === $status || 'pending' === $status || 'queued' === $status || '' === $status ) {
+				usleep( $us );
+				continue;
+			}
+
+			// Publer sometimes uses "complete", sometimes "completed".
+			if ( 'complete' === $status || 'completed' === $status || 'success' === $status ) {
+				$payload  = isset( $resp['payload'] ) && is_array( $resp['payload'] ) ? $resp['payload'] : [];
+				$failures = $payload['failures'] ?? null;
+				if ( ! empty( $failures ) ) {
+					$msg = $this->format_failures( $failures );
+					return new \WP_Error(
+						'social_publisher_publer_job_failures',
+						sprintf( /* translators: %s detail */ __( 'Publer accepted the job but the draft failed: %s', 'social-publisher' ), $msg ),
+						[ 'job_id' => $job_id, 'status' => $status, 'payload' => $payload ]
+					);
+				}
+				return $resp;
+			}
+
+			if ( 'failed' === $status || 'error' === $status ) {
+				$payload = isset( $resp['payload'] ) && is_array( $resp['payload'] ) ? $resp['payload'] : [];
+				$msg     = $this->format_failures( $payload['failures'] ?? $payload ?: $resp );
+				return new \WP_Error(
+					'social_publisher_publer_job_failed',
+					sprintf( /* translators: %s detail */ __( 'Publer reported the job as failed: %s', 'social-publisher' ), $msg ),
+					[ 'job_id' => $job_id, 'status' => $status, 'payload' => $payload ]
+				);
+			}
+
+			// Unknown status — treat as terminal so we don't loop forever.
+			return new \WP_Error(
+				'social_publisher_publer_job_unknown',
+				sprintf( /* translators: %s status */ __( 'Publer returned unexpected job status: %s', 'social-publisher' ), $status ),
+				[ 'job_id' => $job_id, 'response' => $resp ]
+			);
+		}
+
+		return new \WP_Error(
+			'social_publisher_publer_job_timeout',
+			__( 'Timed out waiting for Publer to finish processing the job.', 'social-publisher' ),
+			[ 'job_id' => $job_id, 'tried' => $max ]
+		);
+	}
+
+	private function format_failures( $failures ): string {
+		if ( is_string( $failures ) ) {
+			return $failures;
+		}
+		if ( ! is_array( $failures ) ) {
+			return wp_json_encode( $failures );
+		}
+		$parts = [];
+		foreach ( $failures as $key => $val ) {
+			if ( is_array( $val ) ) {
+				$msg = (string) ( $val['message'] ?? $val['error'] ?? wp_json_encode( $val ) );
+				$who = (string) ( $val['account_name'] ?? $val['provider'] ?? $key );
+				$parts[] = trim( $who . ': ' . $msg );
+			} else {
+				$parts[] = $key . ': ' . (string) $val;
+			}
+		}
+		return implode( ' | ', $parts );
 	}
 
 	/**

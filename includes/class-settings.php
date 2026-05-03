@@ -54,6 +54,7 @@ class Settings {
 		add_action( 'admin_init', [ $this, 'register_settings' ] );
 		add_action( 'admin_menu', [ $this, 'register_menu' ] );
 		add_action( 'admin_post_social_publisher_flush_cache', [ $this, 'handle_flush_cache' ] );
+		add_action( 'admin_post_social_publisher_test_draft',  [ $this, 'handle_test_draft' ] );
 	}
 
 	public function register_settings(): void {
@@ -161,6 +162,70 @@ class Settings {
 		exit;
 	}
 
+	/**
+	 * Create a one-off test draft on the first connected account so the
+	 * user can verify the full pipeline without publishing a real post.
+	 */
+	public function handle_test_draft(): void {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_die( esc_html__( 'Unauthorized.', 'social-publisher' ) );
+		}
+		check_admin_referer( 'social_publisher_test_draft' );
+
+		$publer   = new Publer_Client( $this->get_secret( 'publer_api_key' ), $this->get( 'publer_workspace_id', '' ) );
+		$accounts = $publer->get_accounts( true );
+
+		$args = [ 'page' => 'social-publisher' ];
+
+		if ( $publer->get_last_error() instanceof \WP_Error ) {
+			$args['test_status'] = 'fail';
+			$args['test_msg']    = rawurlencode( $publer->get_last_error()->get_error_message() );
+			wp_safe_redirect( add_query_arg( $args, admin_url( 'options-general.php' ) ) );
+			exit;
+		}
+		if ( empty( $accounts ) ) {
+			$args['test_status'] = 'fail';
+			$args['test_msg']    = rawurlencode( __( 'No active accounts to test against.', 'social-publisher' ) );
+			wp_safe_redirect( add_query_arg( $args, admin_url( 'options-general.php' ) ) );
+			exit;
+		}
+
+		$account    = $accounts[0];
+		$account_id = (string) ( $account['id'] ?? '' );
+		$provider   = (string) ( $account['provider'] ?? '' );
+		$name       = (string) ( $account['name'] ?? $account_id );
+
+		$text   = sprintf(
+			/* translators: 1 site name, 2 timestamp */
+			__( '[Social Publisher test draft] %1$s — %2$s', 'social-publisher' ),
+			get_bloginfo( 'name' ),
+			wp_date( 'Y-m-d H:i' )
+		);
+		$result = $publer->create_draft( $account_id, $provider, $text, home_url( '/' ) );
+
+		if ( is_wp_error( $result ) ) {
+			Logger::error( 'Test draft failed', [
+				'error'   => $result->get_error_message(),
+				'data'    => $result->get_error_data(),
+				'account' => $name,
+			] );
+			$args['test_status'] = 'fail';
+			$args['test_msg']    = rawurlencode( $result->get_error_message() );
+		} else {
+			Logger::info( 'Test draft succeeded', [ 'account' => $name, 'job_id' => $result['job_id'] ?? '' ] );
+			$args['test_status'] = 'ok';
+			$args['test_msg']    = rawurlencode( sprintf(
+				/* translators: 1 account name, 2 provider */
+				__( 'Draft created on %1$s (%2$s). Open Publer → Drafts to review.', 'social-publisher' ),
+				$name,
+				$provider
+			) );
+		}
+
+		wp_safe_redirect( add_query_arg( $args, admin_url( 'options-general.php' ) ) );
+		exit;
+	}
+
 	public function render_page(): void {
 		if ( ! current_user_can( 'manage_options' ) ) {
 			return;
@@ -173,6 +238,8 @@ class Settings {
 		$selected_pt   = (array) ( $opts['enabled_post_types'] ?? [] );
 		$selected_pl   = (array) ( $opts['enabled_platforms'] ?? array_keys( self::PLATFORMS ) );
 		$flushed       = ! empty( $_GET['flushed'] );
+		$test_status   = isset( $_GET['test_status'] ) ? sanitize_key( wp_unslash( (string) $_GET['test_status'] ) ) : '';
+		$test_msg      = isset( $_GET['test_msg'] ) ? rawurldecode( (string) wp_unslash( $_GET['test_msg'] ) ) : '';
 
 		// Live preview: connected Publer accounts.
 		$accounts      = [];
@@ -188,6 +255,11 @@ class Settings {
 			<h1><?php esc_html_e( 'Social Publisher', 'social-publisher' ); ?></h1>
 			<?php if ( $flushed ) : ?>
 				<div class="notice notice-success is-dismissible"><p><?php esc_html_e( 'Publer account cache flushed.', 'social-publisher' ); ?></p></div>
+			<?php endif; ?>
+			<?php if ( 'ok' === $test_status ) : ?>
+				<div class="notice notice-success is-dismissible"><p><strong><?php esc_html_e( 'Test draft sent.', 'social-publisher' ); ?></strong> <?php echo esc_html( $test_msg ); ?></p></div>
+			<?php elseif ( 'fail' === $test_status ) : ?>
+				<div class="notice notice-error is-dismissible"><p><strong><?php esc_html_e( 'Test draft failed.', 'social-publisher' ); ?></strong> <?php echo esc_html( $test_msg ); ?></p></div>
 			<?php endif; ?>
 
 			<form method="post" action="options.php">
@@ -270,7 +342,15 @@ class Settings {
 								<a class="button" href="<?php echo esc_url( wp_nonce_url( admin_url( 'admin-post.php?action=social_publisher_flush_cache' ), 'social_publisher_flush_cache' ) ); ?>">
 									<?php esc_html_e( 'Flush account cache', 'social-publisher' ); ?>
 								</a>
+								<?php if ( ! empty( $accounts ) ) : ?>
+									<a class="button button-primary" href="<?php echo esc_url( wp_nonce_url( admin_url( 'admin-post.php?action=social_publisher_test_draft' ), 'social_publisher_test_draft' ) ); ?>">
+										<?php esc_html_e( 'Send test draft', 'social-publisher' ); ?>
+									</a>
+								<?php endif; ?>
 							</p>
+							<?php if ( ! empty( $accounts ) ) : ?>
+								<p class="description"><?php esc_html_e( 'Test draft posts a short message to the first connected account so you can verify Publer is receiving drafts.', 'social-publisher' ); ?></p>
+							<?php endif; ?>
 						</td>
 					</tr>
 				</table>

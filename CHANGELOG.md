@@ -5,6 +5,27 @@ are versioned: `dist/social-publisher-v<VERSION>.zip`.
 
 Copyright © 2026 Penny Constellation.
 
+## 1.02 — 2026-05-02
+
+Fix: Publer drafts were never actually being created even though the API
+returned 200. `POST /v1/posts/schedule` is asynchronous — it returns a
+`job_id` and the real work happens in the background, where it can still
+fail per-account.
+
+- After scheduling, the client now polls `GET /v1/job_status/{job_id}`
+  until the job leaves the `working` state (default 12 × 1 s).
+- Treats per-account `payload.failures` as a real error and surfaces the
+  Publer message (e.g. provider name + reason).
+- Returns explicit errors for `failed`, unknown statuses, and timeouts so
+  the orchestrator records them and the run summary reflects reality.
+- Adds a **Send test draft** button on the settings page that posts a
+  short message to the first connected account so you can verify the
+  full pipeline (auth → schedule → job poll → draft) without publishing
+  a real WordPress post. Result is shown inline as a success or error
+  notice, and logged to the activity log.
+- New filters: `social_publisher_publer_job_status_path`,
+  `social_publisher_publer_job_max_polls`, `social_publisher_publer_job_poll_us`.
+
 ## 1.01 — 2026-05-02
 
 Fix: Publer integration was hitting the wrong host and wrong endpoints, so
